@@ -26,8 +26,6 @@ import (
 const MTU = 2048
 
 // ================= 1. 幀處理器 (Framer) =================
-// 因為 KCP+TLS 是連續的數據流(Stream)，我們需要在每個數據包前加上 2 bytes 的長度
-// 這樣接收端才知道一個完整的以太網幀在哪裡結束
 
 func writeFrame(conn net.Conn, data []byte) error {
 	buf := make([]byte, 2+len(data))
@@ -44,7 +42,6 @@ func readFrame(conn net.Conn) ([]byte, error) {
 	}
 	length := binary.BigEndian.Uint16(lenBuf)
 	
-	// 避免惡意包導致內存溢出
 	if length > MTU*2 {
 		return nil, fmt.Errorf("數據幀過大: %d", length)
 	}
@@ -56,7 +53,7 @@ func readFrame(conn net.Conn) ([]byte, error) {
 	return data, nil
 }
 
-// ================= 2. 基礎組件 (握手、IPAM、VSwitch) =================
+// ================= 2. 基礎組件 (IPAM 升級版、VSwitch) =================
 
 type HandshakeMsg struct {
 	Type string `json:"type"`
@@ -65,54 +62,136 @@ type HandshakeMsg struct {
 	MAC  string `json:"mac"`
 }
 
+// 🌟 優化後的 IPAM (動態分配與釋放)
 type IPAM struct {
 	mu         sync.Mutex
 	ipv4Prefix string
 	ipv6Prefix string
-	nextID     int
+	usedIDs    map[int]bool // 記錄 2~254 中哪些 IP 正在被使用
 }
 
-func NewIPAM(v4, v6 string) *IPAM { return &IPAM{ipv4Prefix: v4, ipv6Prefix: v6, nextID: 2} }
-func (i *IPAM) Allocate() (string, string) {
-	i.mu.Lock(); defer i.mu.Unlock()
-	v4 := fmt.Sprintf("%s.%d", i.ipv4Prefix, i.nextID)
-	v6 := fmt.Sprintf("%s%x", i.ipv6Prefix, i.nextID)
-	i.nextID++; return v4, v6
+func NewIPAM(v4, v6 string) *IPAM {
+	return &IPAM{
+		ipv4Prefix: v4,
+		ipv6Prefix: v6,
+		usedIDs:    make(map[int]bool),
+	}
 }
 
+// Allocate 尋找池中第一個空閒的 IP
+func (i *IPAM) Allocate() (int, string, string, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	// 遍歷 /24 網段的可用主機 ID (2 到 254，1 保留給伺服器)
+	for id := 2; id <= 254; id++ {
+		if !i.usedIDs[id] {
+			i.usedIDs[id] = true // 標記為使用中
+			v4 := fmt.Sprintf("%s.%d", i.ipv4Prefix, id)
+			v6 := fmt.Sprintf("%s%x", i.ipv6Prefix, id)
+			return id, v4, v6, nil
+		}
+	}
+	return 0, "", "", fmt.Errorf("IP 地址池已耗盡 (最大支援 253 個並發客戶端)")
+}
+
+// Release 釋放斷線客戶端的 IP
+func (i *IPAM) Release(id int) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.usedIDs[id] {
+		delete(i.usedIDs, id)
+		log.Printf("♻️ [IPAM] 已回收 IP 結尾: .%d，返回地址池", id)
+	}
+}
+
+// 🌟 包含獨立發送通道的虛擬交換機 (防止併發崩潰)
 type VSwitch struct {
 	tap      *water.Interface
-	clients  map[net.Conn]bool
+	clients  map[net.Conn]chan []byte
 	macTable map[string]net.Conn
 	mu       sync.RWMutex
 }
 
 func NewVSwitch(tap *water.Interface) *VSwitch {
-	return &VSwitch{tap: tap, clients: make(map[net.Conn]bool), macTable: make(map[string]net.Conn)}
+	return &VSwitch{
+		tap:      tap,
+		clients:  make(map[net.Conn]chan []byte),
+		macTable: make(map[string]net.Conn),
+	}
 }
+
 func (s *VSwitch) Register(mac string, conn net.Conn) {
-	s.mu.Lock(); defer s.mu.Unlock()
-	s.clients[conn] = true; s.macTable[mac] = conn
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	sendChan := make(chan []byte, 1024)
+	s.clients[conn] = sendChan
+	s.macTable[mac] = conn
+
+	// 獨立發送協程
+	go func() {
+		for packet := range sendChan {
+			if err := writeFrame(conn, packet); err != nil {
+				return
+			}
+		}
+	}()
 }
+
 func (s *VSwitch) Unregister(conn net.Conn) {
-	s.mu.Lock(); defer s.mu.Unlock()
-	delete(s.clients, conn)
-	for mac, c := range s.macTable { if c == conn { delete(s.macTable, mac) } }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	if ch, ok := s.clients[conn]; ok {
+		close(ch)
+		delete(s.clients, conn)
+	}
+	for mac, c := range s.macTable {
+		if c == conn {
+			delete(s.macTable, mac)
+		}
+	}
 	conn.Close()
 }
+
 func (s *VSwitch) Forward(packet []byte, sender net.Conn) {
 	if len(packet) < 14 { return }
 	dstMAC := string(packet[0:6])
-	s.mu.RLock(); defer s.mu.RUnlock()
+	srcMAC := string(packet[6:12])
+
+	s.mu.Lock()
+	if sender != nil {
+		s.macTable[srcMAC] = sender // 動態學習 MAC
+	}
+	s.mu.Unlock()
+
+	pktCopy := make([]byte, len(packet))
+	copy(pktCopy, packet)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	isMulticast := (packet[0] & 1) == 1
 	if isMulticast {
-		for conn := range s.clients { if conn != sender { writeFrame(conn, packet) } }
+		for conn, ch := range s.clients {
+			if conn != sender {
+				select { case ch <- pktCopy: default: }
+			}
+		}
 	} else {
-		if target, ok := s.macTable[dstMAC]; ok {
-			if target != sender { writeFrame(target, packet) }
+		if targetConn, ok := s.macTable[dstMAC]; ok {
+			if targetConn != sender {
+				if ch, exists := s.clients[targetConn]; exists {
+					select { case ch <- pktCopy: default: }
+				}
+			}
 		} else {
-			for conn := range s.clients { if conn != sender { writeFrame(conn, packet) } }
+			for conn, ch := range s.clients {
+				if conn != sender {
+					select { case ch <- pktCopy: default: }
+				}
+			}
 		}
 	}
 }
@@ -155,10 +234,8 @@ func main() {
 	tapName := flag.String("tap", "tap0", "tap interface name")
 	v4Net := flag.String("v4net", "10.0.0", "IPv4 Prefix")
 	v6Net := flag.String("v6net", "fd00::", "IPv6 Prefix")
-	
-	// KCP & FEC 參數
-	fecData := flag.Int("fec-d", 5, "FEC Data Shards (原始數據包)")
-	fecParity := flag.Int("fec-p", 2, "FEC Parity Shards (冗餘包)")
+	fecData := flag.Int("fec-d", 5, "FEC Data Shards")
+	fecParity := flag.Int("fec-p", 2, "FEC Parity Shards")
 	flag.Parse()
 
 	config := water.Config{DeviceType: water.TAP}
@@ -178,20 +255,17 @@ func main() {
 // ================= 5. 伺服器端 =================
 
 func runServer(tap *water.Interface, addr, v4p, v6p string, fecD, fecP int) {
-	// 1. 建立 KCP 監聽 (底層自動處理 UDP 分發、ARQ、FEC、流控)
 	listener, err := kcp.ListenWithOptions(addr, nil, fecD, fecP)
 	if err != nil { log.Fatalf("KCP 監聽失敗: %v", err) }
 	
 	log.Printf("🛡️ KCP+TLS (ARQ+FEC) 伺服器運行中 (監聽: %s)", addr)
 
-	// 2. 套用標準 TLS 安全層
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{generateCertificate()}}
 	tlsListener := tls.NewListener(listener, tlsConfig)
 
 	ipam := NewIPAM(v4p, v6p)
 	vswitch := NewVSwitch(tap)
 
-	// TAP 讀取轉發協程
 	go func() {
 		buf := make([]byte, MTU)
 		for {
@@ -207,13 +281,12 @@ func runServer(tap *water.Interface, addr, v4p, v6p string, fecD, fecP int) {
 		go func(c net.Conn) {
 			defer func() { if r := recover(); r != nil { log.Printf("協程崩潰: %v", r) } }()
 
-			// 設定 KCP 極速模式 (關閉延遲，啟用激進 ARQ 策略)
 			if kcpConn, ok := c.(*tls.Conn).NetConn().(*kcp.UDPSession); ok {
 				kcpConn.SetNoDelay(1, 10, 2, 1) 
 				kcpConn.SetWindowSize(1024, 1024)
 			}
 
-			// 握手階段 (使用 Framer 讀取)
+			// 握手階段
 			c.SetReadDeadline(time.Now().Add(5 * time.Second))
 			reqBytes, err := readFrame(c)
 			c.SetReadDeadline(time.Time{})
@@ -225,21 +298,29 @@ func runServer(tap *water.Interface, addr, v4p, v6p string, fecD, fecP int) {
 				c.Close(); return
 			}
 
-			// 分配 IP 並回應
-			v4, v6 := ipam.Allocate()
+			// 🌟 分配 IP，並處理耗盡錯誤
+			ipID, v4, v6, err := ipam.Allocate()
+			if err != nil {
+				log.Printf("⚠️ 拒絕連線 (%s): %v", req.MAC, err)
+				c.Close()
+				return
+			}
+			
+			// 🌟 最關鍵的一行：確保協程結束時（即客戶端斷線），一定會釋放這個 IP
+			defer ipam.Release(ipID)
+
 			resp := HandshakeMsg{Type: "response", IPv4: v4, IPv6: v6}
 			respData, _ := json.Marshal(resp)
 			writeFrame(c, respData)
 
-			log.Printf("✅ 客戶端連線成功: MAC=%s -> 分配 IP: %s\n", req.MAC, v4)
+			log.Printf("✅ 客戶端連線成功: MAC=%s -> 分配 IP: %s (ID: %d)\n", req.MAC, v4, ipID)
 
-			// 註冊並進入轉發迴圈
 			vswitch.Register(req.MAC, c)
 			defer vswitch.Unregister(c)
 
 			for {
 				data, err := readFrame(c)
-				if err != nil { return } // 網路斷開，結束協程
+				if err != nil { return } // 網路斷開，結束協程並觸發所有 defer (包含 IP 釋放)
 				tap.Write(data)
 				vswitch.Forward(data, c)
 			}
@@ -252,7 +333,6 @@ func runServer(tap *water.Interface, addr, v4p, v6p string, fecD, fecP int) {
 func runClient(tap *water.Interface, serverAddr string, fecD, fecP int) {
 	tapChan := make(chan []byte, 100)
 	
-	// 獨立的 TAP 讀取器
 	go func() {
 		buf := make([]byte, MTU)
 		for {
@@ -269,20 +349,16 @@ func runClient(tap *water.Interface, serverAddr string, fecD, fecP int) {
 	for {
 		log.Printf("正在連接伺服器 %s...", serverAddr)
 		
-		// 1. 建立 KCP 連線 (自帶 ARQ 與 FEC)
 		kcpConn, err := kcp.DialWithOptions(serverAddr, nil, fecD, fecP)
 		if err != nil {
 			log.Printf("連接失敗，3秒後重試..."); time.Sleep(3 * time.Second); continue
 		}
 
-		// 設定極速重傳與視窗大小
 		kcpConn.SetNoDelay(1, 10, 2, 1)
 		kcpConn.SetWindowSize(1024, 1024)
 
-		// 2. 升級為 TLS 連線
 		conn := tls.Client(kcpConn, tlsConfig)
 
-		// 3. 發起 VPN 握手
 		reqData, _ := json.Marshal(HandshakeMsg{Type: "request", MAC: clientMAC})
 		if err := writeFrame(conn, reqData); err != nil {
 			conn.Close(); continue
@@ -302,13 +378,11 @@ func runClient(tap *water.Interface, serverAddr string, fecD, fecP int) {
 			conn.Close(); continue
 		}
 
-		// 自動配置網卡
 		setupInterface(tap.Name(), resp.IPv4, resp.IPv6)
 		log.Printf("✅ KCP 隧道建立成功！分配 IP: %s\n", resp.IPv4)
 
 		dropChan := make(chan struct{})
 		
-		// 接收協程
 		go func(c net.Conn) {
 			defer close(dropChan)
 			for {
@@ -318,7 +392,6 @@ func runClient(tap *water.Interface, serverAddr string, fecD, fecP int) {
 			}
 		}(conn)
 
-		// 發送迴圈
 	NetworkLoop:
 		for {
 			select {
