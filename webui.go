@@ -116,8 +116,9 @@ func startWebUI(cfg *Config, tapName string, ipam *IPAM, vswitch *VSwitch, state
 		mode:        cfg.Mode,
 	}
 
-	// 时间序列采样器（1s，保留 120 点 = 2 分钟），供曲线图轮询。
-	ui.sampler = newTrafficSampler(cfg.Mode, ipam, vswitch, state, 120)
+	// 时间序列采样器（1s，保留 180 点 = 3 分钟），供曲线图轮询。
+	// 数据常驻内存，Web UI 重新打开（进程未重启）时仍能拉到最近 3 分钟曲线。
+	ui.sampler = newTrafficSampler(cfg.Mode, ipam, vswitch, state, 180)
 	go ui.sampler.run(quitCh)
 
 	mux := http.NewServeMux()
@@ -131,6 +132,7 @@ func startWebUI(cfg *Config, tapName string, ipam *IPAM, vswitch *VSwitch, state
 	mux.Handle("/api/config", ui.auth(http.HandlerFunc(ui.handleConfig)))
 	mux.Handle("/api/kick", ui.auth(http.HandlerFunc(ui.handleKick)))
 	mux.Handle("/api/chart", ui.auth(http.HandlerFunc(ui.handleChart)))
+	mux.Handle("/api/events", ui.auth(http.HandlerFunc(ui.handleEvents)))
 
 	servers := make([]*http.Server, 0, len(addrIPs))
 	for _, ip := range addrIPs {
@@ -168,6 +170,7 @@ func startWebUI(cfg *Config, tapName string, ipam *IPAM, vswitch *VSwitch, state
 }
 
 // auth 校验 Bearer token。token 为空且非 public 时放行（本机调试便利）。
+// 同时接受 ?token=<value> query（EventSource 无法携带自定义 header）。
 func (u *webUI) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := u.cfg.WebToken
@@ -175,8 +178,10 @@ func (u *webUI) auth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		provided := strings.TrimPrefix(auth, "Bearer ")
+		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if provided == "" {
+			provided = r.URL.Query().Get("token")
+		}
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kcpvpn"`)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -501,4 +506,63 @@ func (u *webUI) handleChart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, u.sampler.snapshot())
+}
+
+// handleEvents 通过 SSE 推送状态/配置/图表数据，替代前端轮询。
+// 连接建立后立即推一个 snapshot（status+config+chart），随后每 ~1s 推 chart 与 status。
+func (u *webUI) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming unsupported"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// 序列化辅助：event 名 + data JSON。
+	send := func(event string, v interface{}) error {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		if err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	// 连接后立即推送全量快照。
+	chart := func() chartSeries {
+		if u.sampler == nil {
+			return chartSeries{Labels: []int64{}}
+		}
+		return u.sampler.snapshot()
+	}
+	if err := send("snapshot", map[string]interface{}{
+		"status": u.statusPayload(),
+		"config": sanitizeConfig(u.cfg),
+		"chart":  chart(),
+	}); err != nil {
+		return
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if err := send("chart", chart()); err != nil {
+				return
+			}
+			if err := send("status", u.statusPayload()); err != nil {
+				return
+			}
+		}
+	}
 }

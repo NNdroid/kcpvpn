@@ -345,15 +345,30 @@ function renderStatus(s) {
 function renderConfig(cfg) {
   currentCfg = cfg;
   const wrap = $('#cfgGroups'); wrap.innerHTML = '';
+  // 所有配置内容合并显示在单个 card 内，按分组排成小节（.cfg-section）。
+  const cardEl = document.createElement('div');
+  cardEl.className = 'card cfg-card';
+  let h = '';
   for (const group of cfgGroups) {
-    const cardEl = document.createElement('div');
-    cardEl.className = 'card cfg-group';
-    let h = '<div class="cfg-group-head"><span class="cfg-group-icon">'+icon(group.icon, 16)+'</span><h3>'+group.name+'</h3></div>';
+    h += '<div class="cfg-section">';
+    h += '<div class="cfg-group-head"><span class="cfg-group-icon">'+icon(group.icon, 16)+'</span><h3>'+group.name+'</h3></div>';
     h += '<div class="cfg-grid">';
     for (const [key, label, type, opts] of group.fields) {
       let input;
       if (type === 'select') {
-        input = '<select data-key="'+key+'">' + opts.map(o => '<option value="'+o+'">'+o+'</option>').join('') + '</select>';
+        // 自定义下拉：隐藏原生 <select>（供读写 value）+ .sel 触发按钮 + .sel 弹出面板。
+        input = '<div class="sel" data-key="'+key+'">'
+          + '<select data-key="'+key+'" class="sel-native" aria-hidden="true" tabindex="-1">'
+          + opts.map(o => '<option value="'+o+'">'+o+'</option>').join('')
+          + '</select>'
+          + '<button type="button" class="sel-btn" aria-haspopup="listbox" aria-expanded="false">'
+          + '<span class="sel-label"></span>'
+          + '<span class="sel-arrow"></span>'
+          + '</button>'
+          + '<div class="sel-panel" role="listbox" hidden>'
+          + opts.map(o => '<div class="sel-opt" role="option" data-val="'+o+'">'+o+'</div>').join('')
+          + '</div>'
+          + '</div>';
       } else if (type === 'checkbox') {
         input = '<label class="cfg-check"><input type="checkbox" data-key="'+key+'"> '+label+'</label>';
       } else {
@@ -367,10 +382,44 @@ function renderConfig(cfg) {
       }
     }
     h += '</div>';
-    cardEl.innerHTML = h;
-    wrap.appendChild(cardEl);
+    h += '</div>';
   }
+  cardEl.innerHTML = h;
+  wrap.appendChild(cardEl);
   applyConfig(cfg);
+}
+
+// ---------- 自定义下拉组件（替代原生 <select>，完全控制弹出面板样式） ----------
+function selSyncLabel(selEl) {
+  const native = selEl.querySelector('.sel-native');
+  const label = selEl.querySelector('.sel-label');
+  if (native && label) {
+    const o = native.options[native.selectedIndex];
+    label.textContent = o ? o.text : '';
+  }
+}
+function selOpen(selEl) {
+  document.querySelectorAll('.sel.open').forEach(s => { if (s !== selEl) selClose(s); });
+  const panel = selEl.querySelector('.sel-panel');
+  const btn = selEl.querySelector('.sel-btn');
+  selEl.classList.add('open');
+  if (panel) panel.hidden = false;
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  selEl.classList.add('opening');
+  requestAnimationFrame(() => selEl.classList.remove('opening'));
+}
+function selClose(selEl) {
+  const panel = selEl.querySelector('.sel-panel');
+  const btn = selEl.querySelector('.sel-btn');
+  selEl.classList.remove('open');
+  if (panel) panel.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+function selChoose(selEl, val) {
+  const native = selEl.querySelector('.sel-native');
+  if (native) native.value = val;
+  selSyncLabel(selEl);
+  selClose(selEl);
 }
 
 function applyConfig(cfg) {
@@ -382,9 +431,16 @@ function applyConfig(cfg) {
     if (key === 'web-enabled') { el.checked = !!val; continue; }
     el.value = (val === null || val === undefined) ? '' : val;
     if (key === 'psk' || key === 'web-token') { el.value = '***'; }
+    // 自定义下拉：同步触发按钮上的当前值文本。
+    const selEl = el.closest ? el.closest('.sel') : null;
+    if (selEl) selSyncLabel(selEl);
   }
   const modeSel = document.querySelector('[data-key="mode"]');
-  if (modeSel) modeSel.disabled = true;
+  if (modeSel) {
+    modeSel.disabled = true;
+    const modeSelEl = modeSel.closest ? modeSel.closest('.sel') : null;
+    if (modeSelEl) modeSelEl.classList.add('sel-disabled');
+  }
 }
 
 async function refresh() {
@@ -394,6 +450,43 @@ async function refresh() {
     $('#main').style.display = '';
     renderStatus(s); renderConfig(cfg);
   } catch (e) { if (e.message !== 'unauthorized') toast(t('loadFailed') + ': ' + e.message, false); }
+}
+
+// ---------- SSE：服务端推送替代前端轮询 ----------
+let sse = null;
+function connectSSE() {
+  const tk = token();
+  if (!tk) return;
+  if (sse) { sse.close(); sse = null; }
+  const es = new EventSource('/api/events?token=' + encodeURIComponent(tk));
+  sse = es;
+  const parse = ev => { try { return JSON.parse(ev.data); } catch (e) { return null; } };
+  // snapshot：status+config+chart 全量。
+  es.addEventListener('snapshot', ev => {
+    const m = parse(ev); if (!m) return;
+    if (m.status) { currentStatus = m.status; renderStatus(m.status); }
+    if (m.config) renderConfig(m.config);
+    if (m.chart) { if (!charts.traffic) initCharts(); updateCharts(m.chart); }
+    $('#main').style.display = '';
+  });
+  // status：运行状态更新。
+  es.addEventListener('status', ev => {
+    const m = parse(ev); if (!m) return;
+    if (m.status) { currentStatus = m.status; renderStatus(m.status); $('#main').style.display = ''; }
+  });
+  // config：配置更新。
+  es.addEventListener('config', ev => {
+    const m = parse(ev); if (!m || !m.config) return;
+    renderConfig(m.config);
+  });
+  // chart：时间序列更新。
+  es.addEventListener('chart', ev => {
+    const m = parse(ev); if (!m) return;
+    if (!charts.traffic) initCharts();
+    updateCharts(m);
+  });
+  // onerror 由 EventSource 自动重连；这里只做提示，不重复创建。
+  es.onerror = () => {};
 }
 
 async function saveConfig() {
@@ -424,17 +517,41 @@ async function kick(offset) {
 
 function showLogin() { $('#loginOverlay').style.display = 'flex'; }
 function hideLogin() { $('#loginOverlay').style.display = 'none'; }
+
+// ---------- 自定义下拉：事件委托（点击按钮开合、点击选项选中、点击外部关闭） ----------
+document.addEventListener('click', e => {
+  const btn = e.target.closest ? e.target.closest('.sel-btn') : null;
+  if (btn) {
+    const selEl = btn.closest('.sel');
+    if (selEl) {
+      if (selEl.classList.contains('open')) selClose(selEl);
+      else selOpen(selEl);
+    }
+    return;
+  }
+  const opt = e.target.closest ? e.target.closest('.sel-opt') : null;
+  if (opt) {
+    const selEl = opt.closest('.sel');
+    if (selEl) selChoose(selEl, opt.getAttribute('data-val'));
+    return;
+  }
+  // 点击组件外部 → 关闭所有展开的下拉。
+  if (!(e.target.closest && e.target.closest('.sel'))) {
+    document.querySelectorAll('.sel.open').forEach(selClose);
+  }
+});
+
 function login() {
   const v = $('#tokenInput').value.trim();
-  setToken(v); hideLogin(); refresh(); loadCharts();
+  setToken(v); hideLogin(); connectSSE();
 }
-function logout() { setToken(''); $('#main').style.display = 'none'; switchTab('overview'); showLogin(); }
+function logout() {
+  if (sse) { sse.close(); sse = null; }
+  setToken(''); $('#main').style.display = 'none'; switchTab('overview'); showLogin();
+}
 
 $('#tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 window.addEventListener('load', () => {
   applyTheme(); applyI18n();
-  if (!token()) showLogin(); else { hideLogin(); refresh(); loadCharts(); }
-  setInterval(() => {
-    if (token()) { refresh(); loadCharts(); }
-  }, 5000);
+  if (!token()) showLogin(); else { hideLogin(); connectSSE(); }
 });

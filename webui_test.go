@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"io"
 	"net"
 	"net/http"
@@ -351,5 +352,92 @@ func TestHandleChart(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, `"labels"`) || !strings.Contains(body, `"rx_bps"`) || !strings.Contains(body, `"drops_per_s"`) {
 		t.Fatalf("chart body missing series keys: %s", body)
+	}
+}
+
+// TestHandleEvents 验证 SSE 端点：无 token 401，带 ?token= 后首个 snapshot 事件含
+// status/config/chart，随后 ticker 推送 chart 事件。同时覆盖 auth 的 query token 路径。
+func TestHandleEvents(t *testing.T) {
+	vs := NewVSwitch(nil)
+	ipam := NewIPAM(nil, nil, 8)
+	s := newTrafficSampler("server", ipam, vs, nil, 5)
+	s.tick(time.Now())
+
+	ui := &webUI{cfg: &Config{WebToken: "testtoken"}, mode: "server", sampler: s, startedAt: time.Now()}
+	mux := http.NewServeMux()
+	mux.Handle("/api/events", ui.auth(http.HandlerFunc(ui.handleEvents)))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// 无 token → 401。
+	resp, err := http.Get(srv.URL + "/api/events")
+	if err != nil {
+		t.Fatalf("GET events no token: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("no token should 401, got %d", resp.StatusCode)
+	}
+
+	// 带 ?token= → 200，SSE 流式输出。
+	req, _ := http.NewRequest("GET", srv.URL+"/api/events?token=testtoken", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events with token: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("events should 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type should be text/event-stream, got %q", ct)
+	}
+
+	// 逐行读 SSE，收集 event/data 对。
+	br := bufio.NewReader(resp.Body)
+	readEvents := func(max int) map[string]string {
+		got := map[string]string{}
+		var ev string
+		for i := 0; i < max; i++ {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				break
+			}
+			line = strings.TrimRight(line, "\r\n")
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				ev = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				got[ev] = strings.TrimPrefix(line, "data: ")
+			}
+			if got[ev] != "" && len(got) >= 2 {
+				break
+			}
+		}
+		return got
+	}
+
+	// 首个 snapshot 事件应含 status/config/chart。
+	snap := readEvents(20)
+	if snap["snapshot"] == "" {
+		t.Fatalf("no snapshot event, got %v", snap)
+	}
+	for _, key := range []string{`"status"`, `"config"`, `"chart"`} {
+		if !strings.Contains(snap["snapshot"], key) {
+			t.Fatalf("snapshot missing %s: %s", key, snap["snapshot"])
+		}
+	}
+	if !strings.Contains(snap["snapshot"], `"rx_bps"`) {
+		t.Fatalf("snapshot chart missing rx_bps: %s", snap["snapshot"])
+	}
+
+	// 后续 ticker 推送 chart 事件（等下一拍）。
+	time.Sleep(1100 * time.Millisecond)
+	chartEv := readEvents(40)
+	if chartEv["chart"] == "" {
+		t.Fatalf("no chart event after tick, got %v", chartEv)
+	}
+	if !strings.Contains(chartEv["chart"], `"rx_bps"`) {
+		t.Fatalf("chart event missing rx_bps: %s", chartEv["chart"])
 	}
 }
