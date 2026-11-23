@@ -195,7 +195,7 @@ func TestStartWebUIEndToEnd(t *testing.T) {
 		t.Fatalf("status with token failed: %d %s", resp.StatusCode, body)
 	}
 
-	// 首页 HTML：含标题与 chart.umd.js 引用。
+	// 首页 HTML：含标题、外部 CSS/JS 与 chart.umd.js 引用。
 	resp, err = http.Get(base + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
@@ -205,8 +205,23 @@ func TestStartWebUIEndToEnd(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(string(html), "KCPVPN") {
 		t.Fatalf("index html missing, status=%d", resp.StatusCode)
 	}
-	if !strings.Contains(string(html), "chart.umd.js") {
-		t.Fatalf("index html missing chart.umd.js reference")
+	for _, asset := range []string{"style.css", "app.js", "chart.umd.js"} {
+		if !strings.Contains(string(html), asset) {
+			t.Fatalf("index html missing %s reference", asset)
+		}
+	}
+
+	// 静态资源（CSS/JS/图表库）应实际可访问且非空。
+	for _, asset := range []string{"style.css", "app.js", "chart.umd.js"} {
+		resp, err = http.Get(base + "/" + asset)
+		if err != nil {
+			t.Fatalf("GET /%s: %v", asset, err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || len(b) == 0 {
+			t.Fatalf("GET /%s failed: status=%d len=%d", asset, resp.StatusCode, len(b))
+		}
 	}
 
 	// /api/chart：等待 sampler 至少采样一次，返回 labels+series。

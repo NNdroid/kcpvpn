@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -120,7 +121,12 @@ func startWebUI(cfg *Config, tapName string, ipam *IPAM, vswitch *VSwitch, state
 	go ui.sampler.run(quitCh)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", ui.handleIndex)
+	// 静态资源：以嵌入的 webui/ 為根，/ → index.html、/style.css、/app.js、/chart.umd.js 自動提供。
+	webRoot, err := fs.Sub(webFS, "webui")
+	if err != nil {
+		return fmt.Errorf("webui sub fs: %w", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(webRoot)))
 	mux.Handle("/api/status", ui.auth(http.HandlerFunc(ui.handleStatus)))
 	mux.Handle("/api/config", ui.auth(http.HandlerFunc(ui.handleConfig)))
 	mux.Handle("/api/kick", ui.auth(http.HandlerFunc(ui.handleKick)))
@@ -178,21 +184,6 @@ func (u *webUI) auth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// handleIndex 返回嵌入的静态页面。
-func (u *webUI) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	data, err := webFS.ReadFile("webui/index.html")
-	if err != nil {
-		http.Error(w, "webui asset missing", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
 }
 
 // handleStatus 返回运行状态（服务端：客户端列表 + 交换机统计；客户端：隧道状态）。
