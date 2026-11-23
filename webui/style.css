@@ -385,6 +385,17 @@ input[type="checkbox"]:focus-visible { outline: none; box-shadow: var(--ring); }
   font-size: 12.5px; font-variant-numeric: tabular-nums;
 }
 
+/* ---------- 底部 ---------- */
+.app-footer {
+  text-align: center; padding: 28px 16px 24px;
+  color: var(--muted); font-size: 12px; letter-spacing: .4px;
+}
+.app-footer .footer-brand {
+  font-weight: 700;
+  background: var(--grad-text);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 900px) {
   .charts { grid-template-columns: 1fr; }
