@@ -263,6 +263,13 @@ select {
   padding-right: 34px;
   cursor: pointer;
 }
+select option {
+  background: var(--panel2); color: var(--text);
+  padding: 8px 10px;
+}
+select option:hover, select option:checked {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel2));
+}
 
 .cfg-groups { display: flex; flex-direction: column; gap: 16px; }
 .cfg-group { padding: 18px 20px; }
@@ -278,11 +285,29 @@ select {
   display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px;
   font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
 }
-.field input[type="checkbox"] {
-  width: 16px; height: 16px; accent-color: var(--accent);
+/* iOS 风格 toggle switch */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 42px; height: 24px; border-radius: 999px;
+  background: var(--muted2);
+  position: relative; cursor: pointer; border: none;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.18);
+  transition: background .2s ease;
+  flex-shrink: 0; padding: 0;
 }
+input[type="checkbox"]::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,.3);
+  transition: transform .2s cubic-bezier(.2,.9,.3,1.2);
+}
+input[type="checkbox"]:checked { background: var(--grad-accent); }
+input[type="checkbox"]:checked::after { transform: translateX(18px); }
+input[type="checkbox"]:focus-visible { outline: none; box-shadow: var(--ring); }
+
 .cfg-check {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
   font-size: 13px; color: var(--text); text-transform: none; letter-spacing: 0;
   font-weight: 500; padding: 8px 0;
   cursor: pointer;
