@@ -64,22 +64,50 @@ function toggleTheme() {
 }
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
-const cfgFields = [
-  ['mode','mode','select',['server','client']], ['addr','addr','text'],
-  ['tap','tap','text'], ['v4net','v4net','text'], ['v6net','v6net','text'],
-  ['fec-d','fec-d','number'], ['fec-p','fec-p','number'],
-  ['crypt','crypt','select',['aes-gcm','aes','salsa20','none']],
-  ['psk','psk','password'],
-  ['obfs','obfs','select',['none','xor','stun','dns','dtls','quic']],
-  ['pad-max','pad-max','number'], ['mtu','mtu','number'],
-  ['sndwnd','sndwnd','number'], ['rcvwnd','rcvwnd','number'],
-  ['dscp','dscp','number'], ['log-level','log-level','select',['debug','info','warn','error']],
-  ['max-clients','max-clients','number'], ['max-rate','max-rate','number'],
-  ['fwmark','fwmark','number'], ['web-enabled','web-enabled','checkbox'],
-  ['web-bind','web-bind','select',['tunnel','local','public']],
-  ['web-addr','web-addr','text'], ['web-token','web-token','password'],
-  ['ip4','ip4','text'], ['ip6','ip6','text'], ['mac','mac','text'],
+// 配置字段按类型分组渲染；cfgFields 为全部字段的扁平列表（供取值/保存用）。
+const cfgGroups = [
+  { name: '连接与网络', icon: '🌐', fields: [
+    ['mode','模式','select',['server','client']],
+    ['addr','监听地址','text'],
+    ['tap','TAP 网卡','text'],
+    ['v4net','IPv4 网段','text'],
+    ['v6net','IPv6 网段','text'],
+  ]},
+  { name: '本机隧道地址', icon: '📡', fields: [
+    ['ip4','IPv4 地址','text'],
+    ['ip6','IPv6 地址','text'],
+    ['mac','MAC 地址','text'],
+  ]},
+  { name: '加密与混淆', icon: '🔒', fields: [
+    ['crypt','加密算法','select',['aes-gcm','aes','salsa20','none']],
+    ['psk','预共享密钥','password'],
+    ['obfs','混淆模式','select',['none','xor','stun','dns','dtls','quic']],
+    ['pad-max','最大填充','number'],
+  ]},
+  { name: '传输与性能', icon: '⚡', fields: [
+    ['fec-d','FEC 数据分片','number'],
+    ['fec-p','FEC 校验分片','number'],
+    ['mtu','MTU','number'],
+    ['sndwnd','发送窗口','number'],
+    ['rcvwnd','接收窗口','number'],
+    ['dscp','DSCP','number'],
+    ['fwmark','防火墙标记','number'],
+  ]},
+  { name: '连接限制', icon: '👥', fields: [
+    ['max-clients','最大客户端','number'],
+    ['max-rate','最大速率','number'],
+  ]},
+  { name: '日志', icon: '📝', fields: [
+    ['log-level','日志级别','select',['debug','info','warn','error']],
+  ]},
+  { name: 'Web 管理', icon: '🖥️', fields: [
+    ['web-enabled','启用 Web UI','checkbox'],
+    ['web-bind','绑定模式','select',['tunnel','local','public']],
+    ['web-addr','监听地址','text'],
+    ['web-token','访问令牌','password'],
+  ]},
 ];
+const cfgFields = cfgGroups.flatMap(g => g.fields);
 
 let currentStatus = null, currentCfg = null;
 let charts = {};
@@ -252,19 +280,26 @@ function renderStatus(s) {
 
 function renderConfig(cfg) {
   currentCfg = cfg;
-  const grid = $('#cfgGrid'); grid.innerHTML = '';
-  for (const [key, label, type, opts] of cfgFields) {
-    const div = document.createElement('div'); div.className = 'field';
-    let input;
-    if (type === 'select') {
-      input = '<select data-key="'+key+'">' + opts.map(o => '<option value="'+o+'">'+o+'</option>').join('') + '</select>';
-    } else if (type === 'checkbox') {
-      input = '<label><input type="checkbox" data-key="'+key+'" style="width:auto"> '+label+'</label>';
-    } else {
-      input = '<input type="'+type+'" data-key="'+key+'" autocomplete="off">';
+  const wrap = $('#cfgGroups'); wrap.innerHTML = '';
+  for (const group of cfgGroups) {
+    const cardEl = document.createElement('div');
+    cardEl.className = 'card cfg-group';
+    let h = '<div class="cfg-group-head"><span class="cfg-group-icon">'+group.icon+'</span><h3>'+group.name+'</h3></div>';
+    h += '<div class="cfg-grid">';
+    for (const [key, label, type, opts] of group.fields) {
+      let input;
+      if (type === 'select') {
+        input = '<select data-key="'+key+'">' + opts.map(o => '<option value="'+o+'">'+o+'</option>').join('') + '</select>';
+      } else if (type === 'checkbox') {
+        input = '<label class="cfg-check"><input type="checkbox" data-key="'+key+'"> '+label+'</label>';
+      } else {
+        input = '<input type="'+type+'" data-key="'+key+'" autocomplete="off">';
+      }
+      h += '<div class="field"><label>'+label+'</label>'+input+'</div>';
     }
-    div.innerHTML = '<label>'+label+'</label>'+input;
-    grid.appendChild(div);
+    h += '</div>';
+    cardEl.innerHTML = h;
+    wrap.appendChild(cardEl);
   }
   applyConfig(cfg);
 }
