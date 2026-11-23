@@ -55,7 +55,8 @@ for PLATFORM in "${PLATFORMS[@]}"; do
         OUTPUT_NAME="${OUTPUT_NAME}.exe"
     fi
     
-    OUTPUT_PATH="${OUTPUT_DIR}/${OUTPUT_NAME}"
+    # 使用絕對路徑輸出，避免 Windows/Git Bash 對相對路徑的轉換問題。
+    OUTPUT_PATH="${ROOT_DIR}/${OUTPUT_DIR}/${OUTPUT_NAME}"
     
     echo "🔨 正在編譯 -> 平台: $GOOS, 架構: $GOARCH"
     
@@ -70,4 +71,4 @@ done
 echo "------------------------------------------"
 echo "✅ 所有編譯任務已完成！"
 echo "📂 執行檔已保存至 '${OUTPUT_DIR}' 目錄下："
-ls -lh "${OUTPUT_DIR}"
+ls -lh "${ROOT_DIR}/${OUTPUT_DIR}"
