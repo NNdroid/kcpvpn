@@ -300,7 +300,8 @@ async function loadCharts() {
 function renderStatus(s) {
   $('#modeBadge').textContent = s.mode;
   $('#modeBadge').className = 'badge ' + s.mode;
-  $('#verBadge').textContent = 'v' + s.version;
+  // Go 端 version 已含 "v" 前缀（如 v1.0.20261123-hash-n），不要重复加。
+  $('#verBadge').textContent = s.version;
 
   let cards = card(t('uptime'), fmtDur(s.uptime_s), t('uptimeSub'));
   cards += card(t('tap'), s.tap || '-', t('tapSub'));
