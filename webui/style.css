@@ -306,12 +306,15 @@ input[type="checkbox"]:checked { background: var(--grad-accent); }
 input[type="checkbox"]:checked::after { transform: translateX(18px); }
 input[type="checkbox"]:focus-visible { outline: none; box-shadow: var(--ring); }
 
+.field-check { display: flex; align-items: center; min-height: 38px; }
 .cfg-check {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 11px;
   font-size: 13px; color: var(--text); text-transform: none; letter-spacing: 0;
-  font-weight: 500; padding: 8px 0;
-  cursor: pointer;
+  font-weight: 500;
+  cursor: pointer; user-select: none;
+  padding: 10px 0;
 }
+.cfg-check:hover { color: var(--accent); }
 
 .actions { margin: 22px 0 0; display: flex; gap: 12px; align-items: center; }
 

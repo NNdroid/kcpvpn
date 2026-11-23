@@ -358,7 +358,12 @@ function renderConfig(cfg) {
       } else {
         input = '<input type="'+type+'" data-key="'+key+'" autocomplete="off">';
       }
-      h += '<div class="field"><label>'+label+'</label>'+input+'</div>';
+      // checkbox 字段自带文字标签，不再输出重复的字段标题。
+      if (type === 'checkbox') {
+        h += '<div class="field field-check">' + input + '</div>';
+      } else {
+        h += '<div class="field"><label>'+label+'</label>'+input+'</div>';
+      }
     }
     h += '</div>';
     cardEl.innerHTML = h;
