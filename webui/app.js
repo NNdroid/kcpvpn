@@ -2,6 +2,7 @@
 const I18N = {
   zh: {
     refresh:'刷新', logout:'退出', theme:'主题', lang:'语言',
+    tabOverview:'概览', tabConn:'连接', tabConfig:'配置',
     loginTitle:'访问令牌', loginDesc:'请输入 web-token（配置中设置）。绑定 public 时必须鉴权。',
     loginPlaceholder:'Bearer token', enter:'进入',
     uptime:'运行时长', uptimeSub:'进程已运行', tap:'TAP 网卡', tapSub:'虚拟接口',
@@ -19,6 +20,7 @@ const I18N = {
   },
   en: {
     refresh:'Refresh', logout:'Logout', theme:'Theme', lang:'Language',
+    tabOverview:'Overview', tabConn:'Connections', tabConfig:'Config',
     loginTitle:'Access Token', loginDesc:'Enter the web-token (set in config). Required when binding public.',
     loginPlaceholder:'Bearer token', enter:'Enter',
     uptime:'Uptime', uptimeSub:'process running', tap:'TAP interface', tapSub:'virtual iface',
@@ -50,14 +52,14 @@ function toggleLang() { lang = lang === 'en' ? 'zh' : 'en'; localStorage.setItem
 
 // ---------- 主题 ----------
 function applyTheme() {
-  const theme = localStorage.getItem('kcpvpn-theme') || 'dark';
+  const theme = localStorage.getItem('kcpvpn-theme') || 'light';
   document.documentElement.setAttribute('data-theme', theme);
   const btn = document.getElementById('themeBtn');
   if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
   if (charts.traffic || charts.clients || charts.drops) initCharts();
 }
 function toggleTheme() {
-  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const cur = document.documentElement.getAttribute('data-theme') || 'light';
   const next = cur === 'dark' ? 'light' : 'dark';
   localStorage.setItem('kcpvpn-theme', next);
   applyTheme();
@@ -111,7 +113,19 @@ const cfgFields = cfgGroups.flatMap(g => g.fields);
 
 let currentStatus = null, currentCfg = null;
 let charts = {};
+let currentTab = 'overview';
 const $ = s => document.querySelector(s);
+
+// ---------- Tab 导航 ----------
+function switchTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => { p.style.display = p.id === 'panel-' + name ? '' : 'none'; });
+  // 连接 Tab 激活时按当前状态更新客户端/隧道区块的显示。
+  if (currentStatus) renderStatus(currentStatus);
+  // 图表在隐藏容器初始化会得到 0 尺寸，切回概览时重建保证渲染正常。
+  if (name === 'overview' && (charts.traffic || charts.clients || charts.drops)) initCharts();
+}
 
 function toast(msg, ok) {
   const t2 = $('#toast'); t2.textContent = msg;
@@ -255,8 +269,10 @@ function renderStatus(s) {
   }
   $('#statCards').innerHTML = cards;
 
+  const onConnTab = currentTab === 'conn';
   if (s.mode === 'server') {
-    $('#clientSection').style.display = '';
+    // 连接 Tab 激活时才显示客户端列表，否则隐藏。
+    $('#clientSection').style.display = onConnTab ? '' : 'none';
     $('#dropsCard').style.display = '';
     const tb = $('#clientTable tbody'); tb.innerHTML = '';
     const rows = s.clients || [];
@@ -268,7 +284,8 @@ function renderStatus(s) {
       tb.appendChild(tr);
     }
   } else {
-    $('#tunnelSection').style.display = '';
+    // 连接 Tab 激活时才显示隧道状态，否则隐藏。
+    $('#tunnelSection').style.display = onConnTab ? '' : 'none';
     $('#dropsCard').style.display = 'none';
     const c = s.client || {};
     const rows = [[t('st'), '<span class="pill '+(c.up?'up':'down')+'">'+(c.up?t('connected'):t('disconnected'))+'</span>'],
@@ -359,13 +376,13 @@ function login() {
   const v = $('#tokenInput').value.trim();
   setToken(v); hideLogin(); refresh(); loadCharts();
 }
-function logout() { setToken(''); $('#main').style.display = 'none'; showLogin(); }
+function logout() { setToken(''); $('#main').style.display = 'none'; switchTab('overview'); showLogin(); }
 
 $('#tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 window.addEventListener('load', () => {
   applyTheme(); applyI18n();
   if (!token()) showLogin(); else { hideLogin(); refresh(); loadCharts(); }
   setInterval(() => {
-    if (token() && $('#main').style.display !== 'none') { refresh(); loadCharts(); }
+    if (token()) { refresh(); loadCharts(); }
   }, 5000);
 });

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark" data-lang="zh">
+<html lang="zh-CN" data-theme="light" data-lang="zh">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,52 +20,64 @@
 </header>
 
 <div class="main" id="main" style="display:none">
-  <div class="grid" id="statCards"></div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview" onclick="switchTab('overview')" data-i18n="tabOverview">概览</button>
+    <button class="tab" data-tab="conn" onclick="switchTab('conn')" data-i18n="tabConn">连接</button>
+    <button class="tab" data-tab="config" onclick="switchTab('config')" data-i18n="tabConfig">配置</button>
+  </nav>
 
-  <div class="section-title" data-i18n="charts">实时曲线</div>
-  <div class="charts">
-    <div class="card full">
-      <h3 data-i18n="chartTraffic">流量速率 (KB/s)</h3>
-      <div class="chart-box"><canvas id="chartTraffic"></canvas></div>
-    </div>
-    <div class="card">
-      <h3 data-i18n="chartClients">在线客户端</h3>
-      <div class="chart-box"><canvas id="chartClients"></canvas></div>
-    </div>
-    <div class="card" id="dropsCard">
-      <h3 data-i18n="chartDrops">VSwitch 丢弃 (帧/s)</h3>
-      <div class="chart-box"><canvas id="chartDrops"></canvas></div>
-    </div>
-  </div>
+  <section class="tab-panel" id="panel-overview">
+    <div class="grid" id="statCards"></div>
 
-  <div id="clientSection" style="display:none">
-    <div class="section-title" data-i18n="clientSection">在线客户端</div>
-    <div class="card">
-      <table id="clientTable">
-        <thead><tr><th data-i18n="thIp4">IPv4</th><th data-i18n="thIp6">IPv6</th><th data-i18n="thMac">MAC</th><th data-i18n="thDur">连接时长</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div id="clientEmpty" class="muted" style="padding:12px 0" data-i18n="noClients">暂无客户端连接</div>
+    <div class="section-title" data-i18n="charts">实时曲线</div>
+    <div class="charts">
+      <div class="card full">
+        <h3 data-i18n="chartTraffic">流量速率 (KB/s)</h3>
+        <div class="chart-box"><canvas id="chartTraffic"></canvas></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="chartClients">在线客户端</h3>
+        <div class="chart-box"><canvas id="chartClients"></canvas></div>
+      </div>
+      <div class="card" id="dropsCard">
+        <h3 data-i18n="chartDrops">VSwitch 丢弃 (帧/s)</h3>
+        <div class="chart-box"><canvas id="chartDrops"></canvas></div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div id="tunnelSection" style="display:none">
-    <div class="section-title" data-i18n="tunnelState">隧道状态</div>
-    <div class="card">
-      <table>
-        <tbody id="tunnelBody"></tbody>
-      </table>
+  <section class="tab-panel" id="panel-conn" style="display:none">
+    <div id="clientSection" style="display:none">
+      <div class="section-title" data-i18n="clientSection">在线客户端</div>
+      <div class="card">
+        <table id="clientTable">
+          <thead><tr><th data-i18n="thIp4">IPv4</th><th data-i18n="thIp6">IPv6</th><th data-i18n="thMac">MAC</th><th data-i18n="thDur">连接时长</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="clientEmpty" class="muted" style="padding:12px 0" data-i18n="noClients">暂无客户端连接</div>
+      </div>
     </div>
-  </div>
 
-  <div class="section-title" data-i18n="configSection">配置编辑</div>
-  <div class="cfg-groups" id="cfgGroups"></div>
-  <div class="card" style="margin-top:16px">
-    <div class="actions" style="margin:0">
-      <button onclick="saveConfig()" data-i18n="saveRestart">保存并重启</button>
-      <span id="saveHint" class="muted" data-i18n="saveHint">保存后写入 config.json 并自动重启进程生效</span>
+    <div id="tunnelSection" style="display:none">
+      <div class="section-title" data-i18n="tunnelState">隧道状态</div>
+      <div class="card">
+        <table>
+          <tbody id="tunnelBody"></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <section class="tab-panel" id="panel-config" style="display:none">
+    <div class="section-title" data-i18n="configSection">配置编辑</div>
+    <div class="cfg-groups" id="cfgGroups"></div>
+    <div class="card" style="margin-top:16px">
+      <div class="actions" style="margin:0">
+        <button onclick="saveConfig()" data-i18n="saveRestart">保存并重启</button>
+        <span id="saveHint" class="muted" data-i18n="saveHint">保存后写入 config.json 并自动重启进程生效</span>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div class="overlay" id="loginOverlay" style="display:none">
