@@ -37,6 +37,24 @@ const I18N = {
     kicked:'Client kicked', kickFailed:'Kick failed',
   }
 };
+
+// ---------- SVG 图标（苹果 SF Symbols 风格线条图标，lucide 开源路径） ----------
+const ICONS = {
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  network: '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  fileText: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+};
+function icon(name, size = 18) {
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+}
+
 let lang = localStorage.getItem('kcpvpn-lang') || 'zh';
 function t(key) { return (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key; }
 function applyI18n() {
@@ -55,7 +73,7 @@ function applyTheme() {
   const theme = localStorage.getItem('kcpvpn-theme') || 'light';
   document.documentElement.setAttribute('data-theme', theme);
   const btn = document.getElementById('themeBtn');
-  if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+  if (btn) btn.innerHTML = icon(theme === 'dark' ? 'moon' : 'sun');
   if (charts.traffic || charts.clients || charts.drops) initCharts();
 }
 function toggleTheme() {
@@ -68,25 +86,25 @@ function cssVar(name) { return getComputedStyle(document.documentElement).getPro
 
 // 配置字段按类型分组渲染；cfgFields 为全部字段的扁平列表（供取值/保存用）。
 const cfgGroups = [
-  { name: '连接与网络', icon: '🌐', fields: [
+  { name: '连接与网络', icon: 'globe', fields: [
     ['mode','模式','select',['server','client']],
     ['addr','监听地址','text'],
     ['tap','TAP 网卡','text'],
     ['v4net','IPv4 网段','text'],
     ['v6net','IPv6 网段','text'],
   ]},
-  { name: '本机隧道地址', icon: '📡', fields: [
+  { name: '本机隧道地址', icon: 'network', fields: [
     ['ip4','IPv4 地址','text'],
     ['ip6','IPv6 地址','text'],
     ['mac','MAC 地址','text'],
   ]},
-  { name: '加密与混淆', icon: '🔒', fields: [
+  { name: '加密与混淆', icon: 'lock', fields: [
     ['crypt','加密算法','select',['aes-gcm','aes','salsa20','none']],
     ['psk','预共享密钥','password'],
     ['obfs','混淆模式','select',['none','xor','stun','dns','dtls','quic']],
     ['pad-max','最大填充','number'],
   ]},
-  { name: '传输与性能', icon: '⚡', fields: [
+  { name: '传输与性能', icon: 'zap', fields: [
     ['fec-d','FEC 数据分片','number'],
     ['fec-p','FEC 校验分片','number'],
     ['mtu','MTU','number'],
@@ -95,14 +113,14 @@ const cfgGroups = [
     ['dscp','DSCP','number'],
     ['fwmark','防火墙标记','number'],
   ]},
-  { name: '连接限制', icon: '👥', fields: [
+  { name: '连接限制', icon: 'users', fields: [
     ['max-clients','最大客户端','number'],
     ['max-rate','最大速率','number'],
   ]},
-  { name: '日志', icon: '📝', fields: [
+  { name: '日志', icon: 'fileText', fields: [
     ['log-level','日志级别','select',['debug','info','warn','error']],
   ]},
-  { name: 'Web 管理', icon: '🖥️', fields: [
+  { name: 'Web 管理', icon: 'monitor', fields: [
     ['web-enabled','启用 Web UI','checkbox'],
     ['web-bind','绑定模式','select',['tunnel','local','public']],
     ['web-addr','监听地址','text'],
@@ -301,7 +319,7 @@ function renderConfig(cfg) {
   for (const group of cfgGroups) {
     const cardEl = document.createElement('div');
     cardEl.className = 'card cfg-group';
-    let h = '<div class="cfg-group-head"><span class="cfg-group-icon">'+group.icon+'</span><h3>'+group.name+'</h3></div>';
+    let h = '<div class="cfg-group-head"><span class="cfg-group-icon">'+icon(group.icon, 16)+'</span><h3>'+group.name+'</h3></div>';
     h += '<div class="cfg-grid">';
     for (const [key, label, type, opts] of group.fields) {
       let input;

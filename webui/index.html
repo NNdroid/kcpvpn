@@ -9,11 +9,11 @@
 </head>
 <body>
 <header>
-  <div class="logo">🔐 KCP<span>VPN</span></div>
+  <div class="logo"><svg class="logo-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg> KCP<span>VPN</span></div>
   <span id="modeBadge" class="badge">…</span>
   <span id="verBadge" class="badge">v…</span>
   <span style="flex:1"></span>
-  <button class="ghost icon" id="themeBtn" onclick="toggleTheme()" title="Theme">🌙</button>
+  <button class="ghost icon" id="themeBtn" onclick="toggleTheme()" title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></button>
   <button class="ghost icon" id="langBtn" onclick="toggleLang()" title="Language">中/EN</button>
   <button class="ghost" onclick="refresh()" data-i18n="refresh">刷新</button>
   <button class="ghost" onclick="logout()" data-i18n="logout">退出</button>
@@ -82,7 +82,7 @@
 
 <div class="overlay" id="loginOverlay" style="display:none">
   <div class="login">
-    <h2 data-i18n="loginTitle">访问令牌</h2>
+    <h2><svg class="login-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="loginTitle">访问令牌</span></h2>
     <p data-i18n="loginDesc">请输入 web-token（配置中设置）。绑定 public 时必须鉴权。</p>
     <input type="password" id="tokenInput" placeholder="Bearer token" autocomplete="off">
     <div class="actions"><button onclick="login()" data-i18n="enter">进入</button></div>
