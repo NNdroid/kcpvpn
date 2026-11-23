@@ -181,27 +181,55 @@ function card(title, value, sub) {
 // ---------- Chart.js 曲线（随主题取色） ----------
 function chartDefaults() {
   const muted = cssVar('--muted') || '#8b949e';
-  const border = cssVar('--border') || '#232d38';
+  const border = cssVar('--border-soft') || 'rgba(120,140,180,.22)';
   const panel2 = cssVar('--panel2') || '#1a222c';
   const text = cssVar('--text') || '#e6edf3';
-  const grid = 'rgba(35,45,56,.35)';
+  const glass = cssVar('--glass-strong') || 'rgba(255,255,255,.72)';
+  const grid = 'rgba(120,140,180,.12)';
   return {
-    responsive: true, maintainAspectRatio: false, animation: false,
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 400, easing: 'easeOutQuart' },
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { labels: { color: muted, boxWidth: 12, font: { size: 11 } } },
-      tooltip: { backgroundColor: panel2, borderColor: border, borderWidth: 1, titleColor: text, bodyColor: muted },
+      legend: {
+        labels: {
+          color: muted, usePointStyle: true, pointStyle: 'circle',
+          boxWidth: 8, boxHeight: 8, padding: 16,
+          font: { size: 11, weight: 600 },
+        },
+      },
+      tooltip: {
+        backgroundColor: glass, borderColor: border, borderWidth: 1,
+        titleColor: text, bodyColor: muted, cornerRadius: 10, padding: 12,
+        boxPadding: 6, usePointStyle: true, boxShadow: '0 8px 24px rgba(31,45,80,.18)',
+        titleFont: { size: 12, weight: 700 }, bodyFont: { size: 12 },
+      },
     },
     scales: {
-      x: { ticks: { color: muted, maxTicksLimit: 8, maxRotation: 0 }, grid: { color: grid } },
-      y: { ticks: { color: muted }, grid: { color: grid }, beginAtZero: true },
+      x: {
+        ticks: { color: muted, maxTicksLimit: 8, maxRotation: 0, font: { size: 10 } },
+        grid: { color: grid }, border: { display: false },
+      },
+      y: {
+        ticks: { color: muted, font: { size: 10 } },
+        grid: { color: grid }, border: { display: false }, beginAtZero: true,
+      },
     },
   };
 }
 function grad(ctx, color) {
-  const g = ctx.createLinearGradient(0, 0, 0, 220);
-  g.addColorStop(0, color + '55'); g.addColorStop(1, color + '00');
+  const g = ctx.createLinearGradient(0, 0, 0, 240);
+  g.addColorStop(0, color + '66'); g.addColorStop(0.6, color + '22'); g.addColorStop(1, color + '00');
   return g;
+}
+// 统一折线数据集样式（平滑曲线 + 渐变填充 + hover 圆点）。
+function lineDataset(label, color, ctx) {
+  return {
+    label, data: [], borderColor: color, backgroundColor: grad(ctx, color),
+    fill: true, tension: 0.4, borderWidth: 2.5, pointRadius: 0,
+    pointHoverRadius: 4, pointHoverBackgroundColor: color,
+    pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, pointHitRadius: 8,
+  };
 }
 function destroyCharts() {
   Object.keys(charts).forEach(k => { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
@@ -214,8 +242,8 @@ function initCharts() {
   if (cTraffic) charts.traffic = new Chart(cTraffic, {
     type: 'line',
     data: { labels: [], datasets: [
-      { label: t('chartIn'), data: [], borderColor: cssVar('--accent2') || '#22d3ee', backgroundColor: grad(cTraffic.getContext('2d'), cssVar('--accent2') || '#22d3ee'), fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0 },
-      { label: t('chartOut'), data: [], borderColor: cssVar('--violet') || '#a78bfa', backgroundColor: grad(cTraffic.getContext('2d'), cssVar('--violet') || '#a78bfa'), fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0 },
+      lineDataset(t('chartIn'), cssVar('--accent2') || '#22d3ee', cTraffic.getContext('2d')),
+      lineDataset(t('chartOut'), cssVar('--violet') || '#a78bfa', cTraffic.getContext('2d')),
     ]},
     options: Object.assign({}, d, {
       scales: Object.assign({}, d.scales, { y: Object.assign({}, d.scales.y, { ticks: Object.assign({}, d.scales.y.ticks, { callback: v => fmtBytes(v) }) }) }),
@@ -225,7 +253,7 @@ function initCharts() {
   if (cClients) charts.clients = new Chart(cClients, {
     type: 'line',
     data: { labels: [], datasets: [
-      { label: t('chartClientCount'), data: [], borderColor: cssVar('--ok') || '#34d399', backgroundColor: grad(cClients.getContext('2d'), cssVar('--ok') || '#34d399'), fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0 },
+      lineDataset(t('chartClientCount'), cssVar('--ok') || '#34d399', cClients.getContext('2d')),
     ]},
     options: Object.assign({}, d, {
       scales: Object.assign({}, d.scales, { y: Object.assign({}, d.scales.y, { ticks: Object.assign({}, d.scales.y.ticks, { stepSize: 1, precision: 0 }) }) }),
@@ -235,7 +263,7 @@ function initCharts() {
   if (cDrops) charts.drops = new Chart(cDrops, {
     type: 'line',
     data: { labels: [], datasets: [
-      { label: t('chartDropsPerSec'), data: [], borderColor: cssVar('--err') || '#f87171', backgroundColor: grad(cDrops.getContext('2d'), cssVar('--err') || '#f87171'), fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0 },
+      lineDataset(t('chartDropsPerSec'), cssVar('--err') || '#f87171', cDrops.getContext('2d')),
     ]},
     options: Object.assign({}, d),
   });
