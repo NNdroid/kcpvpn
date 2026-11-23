@@ -26,7 +26,7 @@ func createTAP(tapName string) (*water.Interface, error) {
 	return iface, err
 }
 
-func setupInterface(name, v4CIDR, v6CIDR string) error {
+func setupInterface(name, v4CIDR, v6CIDR string, mtu int) error {
 	ip, ipNet, err := net.ParseCIDR(v4CIDR)
 	if err != nil {
 		return fmt.Errorf("解析 IPv4 CIDR 失敗: %v", err)
@@ -38,6 +38,10 @@ func setupInterface(name, v4CIDR, v6CIDR string) error {
 		sugar.Warnf("配置 Windows IPv4 警告 (%s): %v, 輸出: %s", v4CIDR, err, strings.TrimSpace(string(output)))
 	}
 
+	if err := setInterfaceMTU(name, mtu); err != nil {
+		sugar.Warnf("設置 Windows MTU 警告 (%s): %v", name, err)
+	}
+
 	if v6CIDR != "" {
 		cmd6 := exec.Command("netsh", "interface", "ipv6", "add", "address", fmt.Sprintf("interface=%s", name), v6CIDR)
 		if output, err := cmd6.CombinedOutput(); err != nil {
@@ -45,7 +49,29 @@ func setupInterface(name, v4CIDR, v6CIDR string) error {
 		}
 	}
 
-	sugar.Infof("網卡 %s 已配置 (Windows): IPv4=%s, IPv6=%s", name, v4CIDR, v6CIDR)
+	sugar.Infof("網卡 %s 已配置 (Windows): IPv4=%s, IPv6=%s, MTU=%d", name, v4CIDR, v6CIDR, mtu)
+	return nil
+}
+
+// setInterfaceMTU 設置網卡 MTU（Windows，持久化）。
+func setInterfaceMTU(name string, mtu int) error {
+	cmdMTU := exec.Command("netsh", "interface", "ipv4", "set", "subinterface",
+		fmt.Sprintf("name=%s", name), fmt.Sprintf("mtu=%d", mtu), "store=persistent")
+	if output, err := cmdMTU.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v, 輸出: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// setInterfaceMAC 設置網卡 MAC（Windows，經 PowerShell Set-NetAdapter，需管理員權限）。
+func setInterfaceMAC(name, mac string) error {
+	// 轉義單引號，避免破壞 PowerShell 命令。
+	name = strings.ReplaceAll(name, "'", "''")
+	ps := fmt.Sprintf("Set-NetAdapter -Name '%s' -MacAddress '%s' -Confirm:$false", name, mac)
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", ps)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%v, 輸出: %s", err, strings.TrimSpace(string(output)))
+	}
 	return nil
 }
 

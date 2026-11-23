@@ -14,6 +14,17 @@ $PLATFORMS = @(
 
 go mod tidy
 
+# 依 git 歷史計算版本號: v1.0.<last commit yyyyMMdd>-<hash7>-<tagCount+1>
+$GIT_DATE = (git log -1 --format='%ad' --date=format:'%Y%m%d' 2>$null)
+$GIT_HASH = (git log -1 --format='%h' 2>$null)
+$GIT_TAG_COUNT = (git tag 2>$null | Measure-Object).Count
+if ($GIT_DATE -and $GIT_HASH) {
+    $VERSION = "v1.0.$GIT_DATE-$GIT_HASH-$($GIT_TAG_COUNT + 1)"
+} else {
+    $VERSION = "dev"
+}
+Write-Host "📌 版本號: $VERSION"
+
 if (Test-Path $OUTPUT_DIR) {
     Remove-Item -Recurse -Force $OUTPUT_DIR
 }
@@ -40,7 +51,7 @@ foreach ($PLATFORM in $PLATFORMS) {
     $env:GOOS = $GOOS
     $env:GOARCH = $GOARCH
 
-    go build -ldflags="-s -w" -o $OUTPUT_PATH .
+    go build -ldflags="-s -w -X main.version=$VERSION" -o $OUTPUT_PATH .
     if ($LASTEXITCODE -ne 0) {
         Write-Error "❌ 編譯失敗: $GOOS/$GOARCH"
         exit 1

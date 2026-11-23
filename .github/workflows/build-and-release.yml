@@ -39,14 +39,17 @@ jobs:
         run: |
           mkdir -p release_assets
           
-          # 計算 Release Tag 名稱
+          # 計算 Release Tag 名稱: v1.0.<last commit yyyyMMdd>-<hash7>-<tagCount+1>
           INPUT_TAG="${{ github.event.inputs.tag_name }}"
           if [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
           elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF_NAME}"
           else
-            TAG="v1.0.$(date +'%Y%m%d')"
+            GIT_DATE=$(git log -1 --format='%ad' --date=format:'%Y%m%d')
+            GIT_HASH=$(git log -1 --format='%h')
+            GIT_TAG_COUNT=$(git tag | wc -l | tr -d ' ')
+            TAG="v1.0.${GIT_DATE}-${GIT_HASH}-$((GIT_TAG_COUNT + 1))"
           fi
           
           echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
@@ -121,12 +124,12 @@ jobs:
           ### 🚀 Quick Start
           **Server**:
           \`\`\`bash
-          ./kcpvpn_linux_amd64 -mode server -addr 0.0.0.0:4000 -psk "your_secret" -obfs stun -pad-max 128 -fec-d 5 -fec-p 2
+          ./kcpvpn_linux_amd64 -config config.json
           \`\`\`
 
           **Client**:
           \`\`\`bash
-          ./kcpvpn_linux_amd64 -mode client -addr 1.2.3.4:4000 -psk "your_secret" -obfs stun -pad-max 128 -fec-d 5 -fec-p 2
+          ./kcpvpn_linux_amd64 -config config.json
           \`\`\`
           EOF
 

@@ -16,7 +16,7 @@ func createTAP(tapName string) (*water.Interface, error) {
 	return water.New(config)
 }
 
-func setupInterface(name, v4CIDR, v6CIDR string) error {
+func setupInterface(name, v4CIDR, v6CIDR string, mtu int) error {
 	cmd4 := exec.Command("ip", "addr", "replace", v4CIDR, "dev", name)
 	if output, err := cmd4.CombinedOutput(); err != nil {
 		return fmt.Errorf("配置 IPv4 失敗 (%s): %v, 輸出: %s", v4CIDR, err, string(output))
@@ -29,12 +29,34 @@ func setupInterface(name, v4CIDR, v6CIDR string) error {
 		}
 	}
 
+	if err := setInterfaceMTU(name, mtu); err != nil {
+		return err
+	}
+
 	cmdUp := exec.Command("ip", "link", "set", name, "up")
 	if output, err := cmdUp.CombinedOutput(); err != nil {
 		return fmt.Errorf("啟用網卡失敗 (%s): %v, 輸出: %s", name, err, string(output))
 	}
 
-	sugar.Infof("網卡 %s 已配置: IPv4=%s, IPv6=%s", name, v4CIDR, v6CIDR)
+	sugar.Infof("網卡 %s 已配置: IPv4=%s, IPv6=%s, MTU=%d", name, v4CIDR, v6CIDR, mtu)
+	return nil
+}
+
+// setInterfaceMTU 設置網卡 MTU（Linux）。
+func setInterfaceMTU(name string, mtu int) error {
+	cmdMTU := exec.Command("ip", "link", "set", "dev", name, "mtu", strconv.Itoa(mtu))
+	if output, err := cmdMTU.CombinedOutput(); err != nil {
+		return fmt.Errorf("設置 MTU 失敗 (%s): %v, 輸出: %s", name, err, string(output))
+	}
+	return nil
+}
+
+// setInterfaceMAC 設置網卡 MAC（Linux，需網卡處於 down 狀態）。
+func setInterfaceMAC(name, mac string) error {
+	cmd := exec.Command("ip", "link", "set", "dev", name, "address", mac)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("設置 MAC 失敗 (%s): %v, 輸出: %s", name, err, string(output))
+	}
 	return nil
 }
 

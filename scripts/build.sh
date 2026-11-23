@@ -28,6 +28,17 @@ PLATFORMS=(
 echo "🔄 執行 go mod tidy ..."
 go mod tidy
 
+# 依 git 歷史計算版本號: v1.0.<last commit yyyyMMdd>-<hash7>-<tagCount+1>
+GIT_DATE=$(git log -1 --format='%ad' --date=format:'%Y%m%d' 2>/dev/null)
+GIT_HASH=$(git log -1 --format='%h' 2>/dev/null)
+GIT_TAG_COUNT=$(git tag 2>/dev/null | wc -l | tr -d ' ')
+if [ -n "$GIT_DATE" ] && [ -n "$GIT_HASH" ]; then
+    VERSION="v1.0.${GIT_DATE}-${GIT_HASH}-$((GIT_TAG_COUNT + 1))"
+else
+    VERSION="dev"
+fi
+echo "📌 版本號: ${VERSION}"
+
 echo "🧹 清理舊的編譯檔案..."
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
@@ -48,7 +59,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     
     echo "🔨 正在編譯 -> 平台: $GOOS, 架構: $GOARCH"
     
-    env CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags="-s -w" -o "${OUTPUT_PATH}" "${MAIN_PATH}"
+    env CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags="-s -w -X main.version=${VERSION}" -o "${OUTPUT_PATH}" "${MAIN_PATH}"
     
     if [ $? -ne 0 ]; then
         echo "❌ 編譯失敗: $GOOS/$GOARCH"

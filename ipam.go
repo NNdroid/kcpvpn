@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 type HandshakeMsg struct {
@@ -16,11 +18,43 @@ type HandshakeMsg struct {
 	GatewayV4 string `json:"gateway_v4,omitempty"`
 	GatewayV6 string `json:"gateway_v6,omitempty"`
 	MAC       string `json:"mac,omitempty"`
+
+	// ② 握手防重放：Nonce（客戶端生成 16B 隨機）+ Ts（unix 秒）。
+	Nonce string `json:"nonce,omitempty"`
+	Ts    int64  `json:"ts,omitempty"`
+}
+
+// validMAC 校驗 MAC 是否為合法的 6 字節 EUI-48 地址（S8）。
+func validMAC(macStr string) bool {
+	hw, err := net.ParseMAC(macStr)
+	return err == nil && len(hw) == 6
+}
+
+// genServerMAC 服務端為連接生成一個本地管理單播 MAC（③：MAC 服務端綁定）。
+// 生成的 MAC 寫入 IPAM/VSwitch 的鍵，客戶端據此配置網卡，杜絕自報仿冒。
+func genServerMAC() (string, error) {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	b[0] &^= 0x01 // 清除 multicast
+	b[0] |= 0x02  // 設置 locally administered
+	return net.HardwareAddr(b).String(), nil
 }
 
 type IPRecord struct {
-	MAC  string
-	Conn net.Conn
+	MAC         string
+	Conn        net.Conn
+	ConnectedAt time.Time
+}
+
+// ClientInfo 是對外暴露的客戶端快照（不含 net.Conn，避免泄露內部句柄）。
+type ClientInfo struct {
+	Offset      uint32    `json:"offset"`
+	IP4         string    `json:"ip4"`
+	IP6         string    `json:"ip6,omitempty"`
+	MAC         string    `json:"mac"`
+	ConnectedAt time.Time `json:"connected_at"`
 }
 
 type IPAM struct {
@@ -97,14 +131,14 @@ func (i *IPAM) Allocate(mac string, conn net.Conn) (uint32, string, string, erro
 
 	for offset, rec := range i.usedIDs {
 		if rec.MAC == mac {
-			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn}
+			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn, ConnectedAt: time.Now()}
 			return offset, getIP4ByOffset(i.v4Net, offset), getIP6ByOffset(i.v6Net, offset), nil
 		}
 	}
 
 	for offset := uint32(2); offset <= i.maxHosts; offset++ {
 		if _, taken := i.usedIDs[offset]; !taken {
-			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn}
+			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn, ConnectedAt: time.Now()}
 			return offset, getIP4ByOffset(i.v4Net, offset), getIP6ByOffset(i.v6Net, offset), nil
 		}
 	}
@@ -134,12 +168,12 @@ func (i *IPAM) Reserve(v4Str string, mac string, conn net.Conn) (uint32, error) 
 
 	if rec, taken := i.usedIDs[offset]; taken {
 		if rec.MAC == mac {
-			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn}
+			i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn, ConnectedAt: time.Now()}
 			return offset, nil
 		}
 		return 0, fmt.Errorf("指定的 IP (%s) 已被其他設備佔用", v4Str)
 	}
-	i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn}
+	i.usedIDs[offset] = IPRecord{MAC: mac, Conn: conn, ConnectedAt: time.Now()}
 	return offset, nil
 }
 
@@ -153,4 +187,42 @@ func (i *IPAM) Release(offset uint32, conn net.Conn) {
 		delete(i.usedIDs, offset)
 		sugar.Debugf("♻️ [IPAM] 已回收 IP 偏移量: +%d", offset)
 	}
+}
+
+// Count 返回在線客戶端數量（供時間序列採樣，避免分配 slice）。
+func (i *IPAM) Count() int {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return len(i.usedIDs)
+}
+
+// Clients 返回所有在線客戶端快照（供 Web UI 狀態展示）。
+func (i *IPAM) Clients() []ClientInfo {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	out := make([]ClientInfo, 0, len(i.usedIDs))
+	for offset, rec := range i.usedIDs {
+		out = append(out, ClientInfo{
+			Offset:      offset,
+			IP4:         getIP4ByOffset(i.v4Net, offset),
+			IP6:         getIP6ByOffset(i.v6Net, offset),
+			MAC:         rec.MAC,
+			ConnectedAt: rec.ConnectedAt,
+		})
+	}
+	return out
+}
+
+// Kick 斷開指定偏移量對應的客戶端連接。返回是否命中。
+func (i *IPAM) Kick(offset uint32) bool {
+	i.mu.Lock()
+	rec, ok := i.usedIDs[offset]
+	i.mu.Unlock()
+	if !ok {
+		return false
+	}
+	if rec.Conn != nil {
+		rec.Conn.Close()
+	}
+	return true
 }
